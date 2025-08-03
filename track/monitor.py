@@ -20,7 +20,7 @@ class HyperliquidMonitor:
         Initialize the Hyperliquid monitor.
         
         Args:
-            addresses: List of addresses to monitor
+            addresses: List of addresses to monitor2
             db_path: Optional path to SQLite database. If None, trades won't be stored
             callback: Optional callback function that will be called for each trade
             silent: If True, callback notifications will be suppressed even if callback is provided.

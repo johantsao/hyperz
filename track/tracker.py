@@ -1,4 +1,4 @@
-from track.monitor import HyperliquidMonitor
+from monitor import HyperliquidMonitor
 from hyperliquid_monitor.types import Trade
 from datetime import datetime, timezone
 import telegram
@@ -15,8 +15,8 @@ processed_tx_hashes = set()
 START_TIME = datetime.now(timezone.utc)
 
 # --- Telegram 設定 ---
-BOT_TOKEN = "7757791406:AAG8Wc0Xe_mXnJaLcZdym9v8rUkdwP1oV0A"
-CHAT_ID = "-1002508499531"
+BOT_TOKEN = "8271110094:AAF1WQtgUxB_SWg5MpYxHFOOBu5J9YYuYkw"
+CHAT_ID = "-4843613367"
 bot = telegram.Bot(token=BOT_TOKEN)
 
 def get_stop_loss_price(wallet, direction):
@@ -82,22 +82,30 @@ def get_take_profit_price(wallet, direction):
 def get_portfolio_info(wallet_address):
     url = "https://api.hyperliquid.xyz/info"
     headers = {"Content-Type": "application/json"}
-    payload = {
+    payload_pnl = {
         "type": "portfolio",
         "user": wallet_address
     }
+    payload_value = {
+        "type": "clearinghouseState",
+        "user": wallet_address
+    }
+
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
+        response_pnl = requests.post(url, headers=headers, json=payload_pnl, timeout=10)
+        response_value = requests.post(url, headers=headers, json=payload_value, timeout=10)
+        if response_pnl.status_code == 200 and response_value.status_code == 200:
+            data_pnl = response_pnl.json()
+            data_value = response_value.json()
             # 提取 allTime 資訊
-            all_time = dict(data)["allTime"]
-            latest_value = float(all_time["accountValueHistory"][-1][1])
+            all_time = dict(data_pnl)["allTime"]
+            all_value = dict(data_value)["marginSummary"]
+            latest_value = float(all_value["accountValue"])
             latest_pnl = float(all_time["pnlHistory"][-1][1])
             return latest_value, latest_pnl
         else:
-            print(f"⚠️ 查詢失敗：HTTP {response.status_code}")
+            print(f"⚠️ 查詢失敗：HTTP PNL:{response_pnl.status_code}, VALUE:{response_value.status_code}")
     except Exception as e:
         print(f"❗ 查詢 portfolio 出錯：{e}")
     
@@ -113,6 +121,7 @@ def get_win_rate(wallet_address):
     now = datetime.now(timezone.utc)
     start_time = now - timedelta(days=30)
     start_time_ms = int(start_time.timestamp() * 1000)
+
 
     payload = {
         "type": "userFillsByTime",
@@ -276,7 +285,7 @@ def print_trade_combined(trade,
         key = trade.tx_hash
         recent_fills[key].append(trade)
         threading.Timer(
-            0.3,
+            60,
             flush_fill,
             args=(trade, get_portfolio_info, get_win_rate, get_nickname, send_telegram_message)
         ).start()
@@ -376,34 +385,43 @@ def print_trade(trade: Trade):
 
 def main():
     addresses = [
-        "0xa6A753c230755A2872B4dee4F59914c6Cad3b5c4",
+        "0x8af700ba841f30e0a3fcb0ee4c4a9d223e1efa05",
         "0xcb92c5988b1d4f145a7b481690051f03ead23a13",
         "0x916ea2a9f3ba1ddd006c52babd0216e2ac54ed32",
+        "0x6e4d47dad1e97833f4ecb0ef56347ba8e6fd1c0e",
         "0x1f250Df59A777d61Cb8bd043c12970F3AFE4F925",
-        "0x8da6BEAA2f002A511809101b24d181a324aE82D6"
+        "0x8da6BEAA2f002A511809101b24d181a324aE82D6",
+        "0xa6A753c230755A2872B4dee4F59914c6Cad3b5c4"
     ]
 
-    monitor = HyperliquidMonitor(
-    addresses = addresses,
-    db_path="trades.db",
-    callback=lambda trade: print_trade_combined(
-        trade,
-        get_portfolio_info,
-        get_win_rate,
-        get_nickname,
-        send_telegram_message
-    )
-)
+    print(START_TIME)
 
-
-    try:
-        print("📡 Monitoring started... Press Ctrl+C to stop.")
-        print(f"追蹤錢包數量: {len(addresses)}")
-        print(f"錢包列表: {addresses}")
-        monitor.start()
-    except KeyboardInterrupt:
-        monitor.stop()
-        print("👋 Monitor stopped.")
+    while True:
+        monitor = HyperliquidMonitor(
+            addresses=addresses,
+            db_path="trades.db",
+            callback=lambda trade: print_trade_combined(
+                trade,
+                get_portfolio_info,
+                get_win_rate,
+                get_nickname,
+                send_telegram_message
+            )
+        )
+        try:
+            print("📡 Monitoring started... Press Ctrl+C to stop.")
+            print(f"追蹤錢包數量: {len(addresses)}")
+            print(f"錢包列表: {addresses}")
+            monitor.start()
+        except KeyboardInterrupt:
+            monitor.stop()
+            print("👋 Monitor stopped.")
+            break
+        except Exception as e:
+            print(f"❗ 監控異常中斷：{e}")
+            monitor.stop()
+            print("⏳ 5 秒後自動重啟監控...")
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
