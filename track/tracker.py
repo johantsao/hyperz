@@ -212,8 +212,6 @@ def flush_fill(trade, get_portfolio_info, get_win_rate, get_nickname, send_teleg
         processed_tx_hashes.add(key)
         processed_fills[key] = current_time
 
-
-    
     # 清除超過 N 秒的歷史紀錄
     for k in list(processed_fills.keys()):
         if current_time - processed_fills[k] > 600:  # 保留 10 分鐘
@@ -223,14 +221,12 @@ def flush_fill(trade, get_portfolio_info, get_win_rate, get_nickname, send_teleg
     avg_price = sum(t.size * t.price for t in trades) / total_size
     direction = trades[0].direction
     coin = trades[0].coin
-    side = trades[0].side
     address = trades[0].address
     timestamp = trades[0].timestamp.strftime('%Y-%m-%d %H:%M:%S')
     tx_hash = trades[0].tx_hash
     pnl = sum(t.closed_pnl or 0 for t in trades)
     stop_loss = get_stop_loss_price(address, trades[0].direction)
     take_profit = get_take_profit_price(address, trades[0].direction)
-
 
     # 以下為補足原 print_trade 的資料
     nickname = get_nickname(address)
@@ -245,7 +241,6 @@ def flush_fill(trade, get_portfolio_info, get_win_rate, get_nickname, send_teleg
         direction = '空單平倉'
     elif direction == 'Close Long':
         direction = '多單平倉'
-
 
     message = (
         f"通知: {coin} {direction}\n"
@@ -263,15 +258,9 @@ def flush_fill(trade, get_portfolio_info, get_win_rate, get_nickname, send_teleg
         f'\n內容僅供資訊參考，並不構成任何投資建議。'
     )
 
-
     send_telegram_message(message)
 
-
-def print_trade_combined(trade,
-                         get_portfolio_info,
-                         get_win_rate,
-                         get_nickname,
-                         send_telegram_message):
+def print_trade_combined(trade, get_portfolio_info, get_win_rate, get_nickname, send_telegram_message):
     if trade.timestamp.tzinfo is None:
         trade_time = trade.timestamp.replace(tzinfo=timezone.utc)
     else:
@@ -284,43 +273,11 @@ def print_trade_combined(trade,
     if trade.trade_type == "FILL":
         key = trade.tx_hash
         recent_fills[key].append(trade)
-        threading.Timer(
-            60,
-            flush_fill,
-            args=(trade, get_portfolio_info, get_win_rate, get_nickname, send_telegram_message)
-        ).start()
+        threading.Timer(60, flush_fill, args=(trade, get_portfolio_info, get_win_rate, get_nickname, send_telegram_message)).start()
     else:
         print(f"[非 FILL] {trade.trade_type}: {trade.coin} {trade.side} {trade.size}@{trade.price}")
-        
-    # Color codes for console
-    GREEN = '\033[92m'
-    RED = '\033[91m'
-    BLUE = '\033[94m'
-    RESET = '\033[0m'
-    
-    timestamp = trade.timestamp.strftime('%Y-%m-%d %H:%M:%S')
-
-    # Console print
-    color = GREEN if trade.side == "BUY" else RED
-    print(f"\n{BLUE}[{timestamp}]{RESET} New {trade.trade_type}:")
-    print(f"Address: {trade.address}")
-    print(f"Coin: {trade.coin}")
-    print(f"{color}Side: {trade.side}{RESET}")
-    print(f"Size: {trade.size}")
-    print(f"Price: {trade.price}")
-    
-    if trade.trade_type == "FILL":
-        print(f"Direction: {trade.direction}")
-        if trade.closed_pnl is not None:
-            pnl_color = GREEN if trade.closed_pnl > 0 else RED
-            print(f"PnL: {pnl_color}{trade.closed_pnl:.2f}{RESET}")
-        print(f"Hash: {trade.tx_hash}")
-
-
 
 def print_trade(trade: Trade):
-    """Print trade info to console and push to Telegram"""
-    
     if trade.timestamp.tzinfo is None:
         trade_time = trade.timestamp.replace(tzinfo=timezone.utc)
     else:
@@ -330,17 +287,14 @@ def print_trade(trade: Trade):
         print(f"[跳過] {trade_time.isoformat()} 是啟動前的單")
         return
 
-
     timestamp = trade.timestamp.strftime('%Y-%m-%d %H:%M:%S')
     nickname = get_nickname(trade.address)
 
-    # Color codes for console
     GREEN = '\033[92m'
     RED = '\033[91m'
     BLUE = '\033[94m'
     RESET = '\033[0m'
 
-    # Console print
     color = GREEN if trade.side == "BUY" else RED
     print(f"\n{BLUE}[{timestamp}]{RESET} New {trade.trade_type}:")
     print(f"Address: {trade.address}")
@@ -355,33 +309,6 @@ def print_trade(trade: Trade):
             pnl_color = GREEN if trade.closed_pnl > 0 else RED
             print(f"PnL: {pnl_color}{trade.closed_pnl:.2f}{RESET}")
         print(f"Hash: {trade.tx_hash}")
-        
-    account_value, account_pnl = get_portfolio_info(trade.address)  
-    
-    win_rate, trade_count = get_win_rate(trade.address)  
-
-    
-    # Telegram 推播訊息
-    if trade.side == 'BUY':
-        trade.side = '空'
-    else:
-        trade.side = '多'
-
-    message = (
-        f"通知: {trade.coin} {trade.side}\n"
-        f"時間: {timestamp}\n"
-        f"地址: {nickname} {trade.address}\n"
-        f"\n倉位: {trade.size * trade.price} USDT\n" 
-        f"市價: {trade.price} USDT\n"
-    )
-    if trade.trade_type == "FILL":
-        if trade.closed_pnl is not None:
-            message += f"盈虧: {trade.closed_pnl:.2f} USDT\n"
-        message += f"\n🔗: https://hypurrscan.io/tx/{trade.tx_hash}"
-    
-    message +=  f"\n\n💼 錢包餘額: {account_value:.2f} USDT\n📊 累積盈虧: {account_pnl:.2f} USDT\n🏆 30日勝率：{win_rate:.2f}%（共 {trade_count} 筆）\n"
-
-    send_telegram_message(message)
 
 def main():
     addresses = [
@@ -397,29 +324,38 @@ def main():
     print(START_TIME)
 
     while True:
-        monitor = HyperliquidMonitor(
-            addresses=addresses,
-            db_path="trades.db",
-            callback=lambda trade: print_trade_combined(
-                trade,
-                get_portfolio_info,
-                get_win_rate,
-                get_nickname,
-                send_telegram_message
-            )
-        )
+        monitor = None
         try:
+            monitor = HyperliquidMonitor(
+                addresses=addresses,
+                db_path="trades.db",
+                callback=lambda trade: print_trade_combined(
+                    trade,
+                    get_portfolio_info,
+                    get_win_rate,
+                    get_nickname,
+                    send_telegram_message
+                )
+            )
             print("📡 Monitoring started... Press Ctrl+C to stop.")
             print(f"追蹤錢包數量: {len(addresses)}")
             print(f"錢包列表: {addresses}")
             monitor.start()
+
         except KeyboardInterrupt:
-            monitor.stop()
+            if monitor:
+                monitor.stop()
             print("👋 Monitor stopped.")
             break
+
         except Exception as e:
             print(f"❗ 監控異常中斷：{e}")
-            monitor.stop()
+            if monitor:
+                try:
+                    monitor.stop()
+                except:
+                    pass
+                del monitor
             print("⏳ 5 秒後自動重啟監控...")
             time.sleep(5)
 
