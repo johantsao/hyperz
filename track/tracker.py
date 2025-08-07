@@ -323,41 +323,34 @@ def main():
 
     print(START_TIME)
 
+    monitor = HyperliquidMonitor(
+        addresses=addresses,
+        db_path="trades.db",
+        callback=lambda trade: print_trade_combined(
+            trade,
+            get_portfolio_info,
+            get_win_rate,
+            get_nickname,
+            send_telegram_message
+        )
+    )
+
     while True:
-        monitor = None
         try:
-            monitor = HyperliquidMonitor(
-                addresses=addresses,
-                db_path="trades.db",
-                callback=lambda trade: print_trade_combined(
-                    trade,
-                    get_portfolio_info,
-                    get_win_rate,
-                    get_nickname,
-                    send_telegram_message
-                )
-            )
             print("📡 Monitoring started... Press Ctrl+C to stop.")
             print(f"追蹤錢包數量: {len(addresses)}")
             print(f"錢包列表: {addresses}")
             monitor.start()
-
         except KeyboardInterrupt:
-            if monitor:
-                monitor.stop()
+            monitor.stop()
             print("👋 Monitor stopped.")
             break
-
         except Exception as e:
             print(f"❗ 監控異常中斷：{e}")
-            if monitor:
-                try:
-                    monitor.stop()
-                except:
-                    pass
-                del monitor
+            monitor.stop()
             print("⏳ 5 秒後自動重啟監控...")
             time.sleep(5)
+
 
 if __name__ == "__main__":
     main()
