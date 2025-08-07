@@ -325,6 +325,11 @@ def main():
 
     while True:
         try:
+            try:
+                monitor.stop()
+            except:
+                pass
+
             monitor = HyperliquidMonitor(
                 addresses=addresses,
                 db_path="trades.db",
@@ -352,6 +357,7 @@ def main():
                 pass
             print("⏳ 5 秒後自動重啟監控...")
             time.sleep(5)
+
 
 
 if __name__ == "__main__":
