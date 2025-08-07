@@ -10,22 +10,15 @@ from hyperliquid.utils import constants
 from hyperliquid_monitor.database import TradeDatabase
 from hyperliquid_monitor.types import Trade, TradeCallback
 
+
 class HyperliquidMonitor:
-    def __init__(self, 
-                 addresses: List[str], 
-                 db_path: Optional[str] = None,
-                 callback: Optional[TradeCallback] = None,
-                 silent: bool = False):
-        """
-        Initialize the Hyperliquid monitor.
-        
-        Args:
-            addresses: List of addresses to monitor2
-            db_path: Optional path to SQLite database. If None, trades won't be stored
-            callback: Optional callback function that will be called for each trade
-            silent: If True, callback notifications will be suppressed even if callback is provided.
-                   Useful for silent database recording. Default is False.
-        """
+    def __init__(
+        self,
+        addresses: List[str],
+        db_path: Optional[str] = None,
+        callback: Optional[TradeCallback] = None,
+        silent: bool = False,
+    ):
         self.info = Info(constants.MAINNET_API_URL)
         self.addresses = addresses
         self.callback = callback if not silent else None
@@ -33,24 +26,22 @@ class HyperliquidMonitor:
         self.db = TradeDatabase(db_path) if db_path else None
         self._stop_event = threading.Event()
         self._db_lock = threading.Lock() if db_path else None
-        
+        self.subscriptions = []  # unsubscribe callback handles
+
         if silent and not db_path:
             raise ValueError("Silent mode requires a database path to be specified")
-        
+
     def handle_shutdown(self, signum=None, frame=None):
-        """Handle shutdown signals"""
         if self._stop_event.is_set():
             sys.exit(0)
-            
+
         print("\nShutting down gracefully...")
-        self._stop_event.set()
-        self.cleanup()
+        self.stop()
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         sys.exit(0)
-        
+
     def cleanup(self):
-        """Clean up resources"""
         if self.db:
             with self._db_lock:
                 self.db.close()
@@ -58,17 +49,15 @@ class HyperliquidMonitor:
                 print("Database connection closed.")
 
     def create_event_handler(self, address: str):
-        """Creates an event handler for a specific address"""
         def handle_event(event: Dict[str, Any]) -> None:
             if self._stop_event.is_set():
                 return
-                
+
             if not isinstance(event, dict):
                 return
-                
+
             data = event.get("data", {})
-            
-            # Handle fills
+
             if "fills" in data:
                 for fill in data["fills"]:
                     if not isinstance(fill, dict):
@@ -83,8 +72,7 @@ class HyperliquidMonitor:
                     except Exception as e:
                         if not self.silent:
                             print(f"Error processing fill: {e}")
-                        
-            # Handle order updates        
+
             if "orderUpdates" in data:
                 for update in data["orderUpdates"]:
                     if not isinstance(update, dict):
@@ -103,13 +91,11 @@ class HyperliquidMonitor:
                     except Exception as e:
                         if not self.silent:
                             print(f"Error processing order update: {e}")
-        
+
         return handle_event
 
     def _process_fill(self, fill: Dict, address: str) -> Trade:
-        """Process fill information and return Trade object"""
         timestamp = datetime.fromtimestamp(int(fill.get("time", 0)) / 1000)
-        
         return Trade(
             timestamp=timestamp,
             address=address,
@@ -125,14 +111,11 @@ class HyperliquidMonitor:
             start_position=float(fill.get("startPosition", 0)),
             closed_pnl=float(fill.get("closedPnl", 0))
         )
-        
-    def _process_order_update(self, update: Dict, address: str) -> List[Trade]:
-        """Process order update information and return Trade objects"""
-        from datetime import timezone
-        timestamp = datetime.fromtimestamp(int(fill.get("time", 0)) / 1000, tz=timezone.utc)
 
+    def _process_order_update(self, update: Dict, address: str) -> List[Trade]:
+        from datetime import timezone
+        timestamp = datetime.fromtimestamp(int(update.get("time", 0)) / 1000, tz=timezone.utc)
         trades = []
-        
         if "placed" in update:
             order = update["placed"]
             trades.append(Trade(
@@ -157,9 +140,8 @@ class HyperliquidMonitor:
                 trade_type="ORDER_CANCELLED",
                 order_id=int(order.get("oid", 0))
             ))
-            
         return trades
-            
+
     def start(self) -> None:
         if not self.addresses:
             raise ValueError("No addresses configured to monitor")
@@ -167,80 +149,31 @@ class HyperliquidMonitor:
         signal.signal(signal.SIGINT, self.handle_shutdown)
         signal.signal(signal.SIGTERM, self.handle_shutdown)
 
-        subscribed_user_events = set()
-        subscribed_user_fills = set()
-
         for address in self.addresses:
             handler = self.create_event_handler(address)
-
-            if address not in subscribed_user_events:
-                try:
-                    self.info.subscribe(
-                        {"type": "userEvents", "user": address},
-                        handler
-                    )
-                    subscribed_user_events.add(address)
-                except NotImplementedError as e:
-                    print(f"[跳過 userEvents 訂閱] 地址 {address} 已訂閱過：{e}")
-                except Exception as e:
-                    print(f"[錯誤] 訂閱 userEvents 失敗：{e}")
-
-            if address not in subscribed_user_fills:
-                try:
-                    self.info.subscribe(
-                        {"type": "userFills", "user": address},
-                        handler
-                    )
-                    subscribed_user_fills.add(address)
-                except Exception as e:
-                    print(f"[錯誤] 訂閱 userFills 失敗：{e}")
+            try:
+                unsub1 = self.info.subscribe({"type": "userEvents", "user": address}, handler)
+                self.subscriptions.append(unsub1)
+            except Exception as e:
+                print(f"[錯誤] 訂閱 userEvents 失敗：{e}")
+            try:
+                unsub2 = self.info.subscribe({"type": "userFills", "user": address}, handler)
+                self.subscriptions.append(unsub2)
+            except Exception as e:
+                print(f"[錯誤] 訂閱 userFills 失敗：{e}")
 
         try:
             while not self._stop_event.is_set():
                 self._stop_event.wait(1)
         except KeyboardInterrupt:
             self.handle_shutdown()
-
-    
-    def start(self) -> None:
-        
-        """Start monitoring addresses"""
-        if not self.addresses:
-            raise ValueError("No addresses configured to monitor")
-
-        # Set up signal handlers
-        signal.signal(signal.SIGINT, self.handle_shutdown)
-        signal.signal(signal.SIGTERM, self.handle_shutdown)
-
-        # 去重處理
-        subscribed_user_events = set()
-
-        # Subscribe to events for each address
-        for address in self.addresses:
-            handler = self.create_event_handler(address)
-
-            # 只訂閱一次 userEvents
-            if address not in subscribed_user_events:
-                self.info.subscribe(
-                    {"type": "userEvents", "user": address},
-                    handler
-                )
-                subscribed_user_events.add(address)
-
-            # userFills 仍可重複訂閱（通常沒這限制）
-            self.info.subscribe(
-                {"type": "userFills", "user": address},
-                handler
-            )
-
-        try:
-            while not self._stop_event.is_set():
-                self._stop_event.wait(1)
-        except KeyboardInterrupt:
-            self.handle_shutdown()
-
 
     def stop(self):
-        """Stop the monitor"""
         self._stop_event.set()
+        for unsub in self.subscriptions:
+            try:
+                unsub()
+            except Exception as e:
+                print(f"[錯誤] unsubscribe 失敗：{e}")
+        self.subscriptions.clear()
         self.cleanup()
